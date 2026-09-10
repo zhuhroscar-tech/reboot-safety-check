@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reboot-safety-check"
+version = "0.1.0"
+description = "Warns about DKMS/kernel-module problems for an installed-but-not-yet-booted kernel, before you reboot into it"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "zhuhroscar-tech" }]
+requires-python = ">=3.9"
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Boot",
+]
+
+[project.urls]
+Homepage = "https://github.com/zhuhroscar-tech/reboot-safety-check"
+
+[project.scripts]
+reboot-safety-check = "reboot_safety_check.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
