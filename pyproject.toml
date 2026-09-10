@@ -25,6 +25,9 @@ Homepage = "https://github.com/zhuhroscar-tech/reboot-safety-check"
 [project.scripts]
 reboot-safety-check = "reboot_safety_check.cli:main"
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
