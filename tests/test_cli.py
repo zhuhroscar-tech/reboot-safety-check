@@ -28,7 +28,7 @@ def test_cli_clean_system_returns_0(monkeypatch, capsys):
     rc = main([])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "looks safe to reboot" in out
+    assert "Looks safe to reboot" in out
 
 
 def test_cli_warnings_return_1(monkeypatch, capsys):
@@ -37,7 +37,7 @@ def test_cli_warnings_return_1(monkeypatch, capsys):
     )
     rc = main([])
     assert rc == 1
-    assert "review the WARN" in capsys.readouterr().out
+    assert "review the warnings" in capsys.readouterr().out
 
 
 def test_cli_failures_return_2(monkeypatch, capsys):
