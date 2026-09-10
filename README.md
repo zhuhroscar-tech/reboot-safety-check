@@ -37,13 +37,26 @@ It cross-references every kernel version you have installed (via
 `/lib/modules/*`) against `dkms status`, flags any DKMS module that isn't
 fully `installed` for an installed-but-not-yet-booted kernel, checks whether
 matching kernel headers are present (a common root cause of build failure),
-and notes when Secure Boot is enabled (unsigned modules get silently refused
-at load time even after a successful build).
+and — when Secure Boot is enabled — actually verifies module signing state
+instead of just telling you to check manually:
+
+- If Secure Boot is on and **no Machine Owner Key is enrolled at all**
+  (`mokutil --list-enrolled` reports zero), that's flagged as a **FAIL**:
+  a DKMS build can succeed and still be silently refused at load time with
+  no enrolled key to trust it.
+- If keys are enrolled, each not-yet-booted kernel's DKMS module is spot
+  checked via `modinfo -k KERNEL MODULE` for a `signer:`/`sig_id:` field;
+  a module built but genuinely unsigned is flagged as a **FAIL** naming the
+  exact module and kernel, not a generic reminder.
+
+This closes the exact gap behind "the build succeeded, the module still
+won't load" reports common with NVIDIA/AMD DKMS drivers under Secure Boot.
 
 **Read-only.** It never runs `dkms install`, never calls a package manager,
-and never reboots anything — it only reads `dkms status`, `/lib/modules`,
-`uname -r`, package-manager query commands (`dpkg-query -W`, `rpm -q`), and
-`mokutil --sb-state`.
+and never reboots, signs, or enrolls anything — it only reads `dkms status`,
+`/lib/modules`, `uname -r`, package-manager query commands (`dpkg-query -W`,
+`rpm -q`), `mokutil --sb-state`, `mokutil --list-enrolled`, and
+`modinfo -k`.
 
 ## Install
 
@@ -94,16 +107,17 @@ check.
 ## Privacy & permissions
 
 No network access, no telemetry. Reads `/lib/modules`, runs `dkms status`,
-`uname -r`, `dpkg-query`/`rpm -q`, and `mokutil --sb-state` — all read-only,
-no root required for any of these on a standard install (though `dkms
-status` output can be more complete when run as root on some distros).
+`uname -r`, `dpkg-query`/`rpm -q`, `mokutil --sb-state`, `mokutil
+--list-enrolled`, and `modinfo -k` — all read-only, no root required for
+any of these on a standard install (though `dkms status` output can be
+more complete when run as root on some distros).
 
 ## Distro / architecture support
 
 Pure Python (stdlib only). Works on any Linux distribution and architecture
-with Python 3.9+; `dkms`, `dpkg`/`rpm`, and `mokutil` are used opportunistically
-when present and gracefully skipped when absent (their absence is reported
-as "unknown", never treated as an error).
+with Python 3.9+; `dkms`, `dpkg`/`rpm`, `mokutil`, and `modinfo` are used
+opportunistically when present and gracefully skipped when absent (their
+absence is reported as "unknown", never treated as an error).
 
 ## Reproducible build & test
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reboot-safety-check"
-version = "0.1.0"
+version = "0.2.0"
 description = "Warns about DKMS/kernel-module problems for an installed-but-not-yet-booted kernel, before you reboot into it"
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,6 +24,9 @@ Homepage = "https://github.com/zhuhroscar-tech/reboot-safety-check"
 
 [project.scripts]
 reboot-safety-check = "reboot_safety_check.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

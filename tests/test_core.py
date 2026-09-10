@@ -140,5 +140,148 @@ def test_evaluate_secure_boot_adds_info_finding_when_modules_present():
         dkms_entries=dkms_entries,
         headers_checker=lambda k: True,
         secure_boot_checker=lambda: True,
+        mok_count_checker=lambda: None,
+        module_signature_checker=lambda module, kernel: None,
     )
     assert any("secure boot" in f.message.lower() for f in report.findings)
+
+
+def test_evaluate_secure_boot_no_enrolled_mok_is_failure():
+    dkms_entries = [DkmsEntry("nvidia", "1.0", "6.8.0-51-generic", "installed")]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: True,
+        mok_count_checker=lambda: 0,
+        module_signature_checker=lambda module, kernel: None,
+    )
+    assert report.has_failures
+    assert any("no enrolled" in f.message.lower() for f in report.findings)
+
+
+def test_evaluate_secure_boot_unsigned_module_for_new_kernel_is_failure():
+    dkms_entries = [
+        DkmsEntry("nvidia", "1.0", "6.8.0-51-generic", "installed"),
+        DkmsEntry("nvidia", "1.0", "6.9.0-1-generic", "installed"),
+    ]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: True,
+        mok_count_checker=lambda: 1,
+        module_signature_checker=lambda module, kernel: kernel != "6.9.0-1-generic",
+    )
+    assert report.has_failures
+    assert any(
+        "no signature" in f.message.lower() and "6.9.0-1-generic" in f.message
+        for f in report.findings
+    )
+
+
+def test_evaluate_secure_boot_signed_module_with_enrolled_mok_is_clean():
+    dkms_entries = [DkmsEntry("nvidia", "1.0", "6.8.0-51-generic", "installed")]
+    report = evaluate(
+        running_kernel="",  # nothing is "not yet booted" so no signature checks run
+        installed_kernels=["6.8.0-51-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: True,
+        mok_count_checker=lambda: 1,
+        module_signature_checker=lambda module, kernel: True,
+    )
+    assert not report.has_failures
+
+
+def test_get_enrolled_mok_count_parses_key_headers(monkeypatch):
+    from reboot_safety_check.core import get_enrolled_mok_count
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+    sample = "[key 1]\nSHA1 Fingerprint: aa:bb\n\tSubject: CN=Test\n[key 2]\nSHA1 Fingerprint: cc:dd\n"
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=sample, stderr="")
+
+    assert get_enrolled_mok_count(runner=fake_runner) == 2
+
+
+def test_get_enrolled_mok_count_zero_when_nothing_enrolled(monkeypatch):
+    from reboot_safety_check.core import get_enrolled_mok_count
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="No MOK certificates are enrolled\n", stderr="")
+
+    assert get_enrolled_mok_count(runner=fake_runner) == 0
+
+
+def test_get_enrolled_mok_count_none_on_failure(monkeypatch):
+    from reboot_safety_check.core import get_enrolled_mok_count
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="err")
+
+    assert get_enrolled_mok_count(runner=fake_runner) is None
+
+
+def test_module_signature_status_true_when_signer_present(monkeypatch):
+    from reboot_safety_check.core import module_signature_status
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/modinfo")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="filename: nvidia.ko\nsigner: Test MOK\nsig_key: 01:02\n", stderr=""
+        )
+
+    assert module_signature_status("nvidia", "6.9.0-1-generic", runner=fake_runner) is True
+
+
+def test_module_signature_status_false_when_no_signer(monkeypatch):
+    from reboot_safety_check.core import module_signature_status
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/modinfo")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="filename: nvidia.ko\nlicense: GPL\n", stderr="")
+
+    assert module_signature_status("nvidia", "6.9.0-1-generic", runner=fake_runner) is False
+
+
+def test_module_signature_status_none_on_failure(monkeypatch):
+    from reboot_safety_check.core import module_signature_status
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/modinfo")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found")
+
+    assert module_signature_status("nvidia", "6.9.0-1-generic", runner=fake_runner) is None
+
+
+def test_get_enrolled_mok_count_none_when_mokutil_missing(monkeypatch):
+    from reboot_safety_check.core import get_enrolled_mok_count
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: None)
+    assert get_enrolled_mok_count(runner=lambda *a, **k: None) is None
+
+
+def test_module_signature_status_none_when_modinfo_missing(monkeypatch):
+    from reboot_safety_check.core import module_signature_status
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: None)
+    assert module_signature_status("nvidia", "6.9.0-1-generic", runner=lambda *a, **k: None) is None

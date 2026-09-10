@@ -183,6 +183,58 @@ def secure_boot_enabled(runner=subprocess.run) -> Optional[bool]:
     return "secureboot enabled" in proc.stdout.lower()
 
 
+def get_enrolled_mok_count(runner=subprocess.run) -> Optional[int]:
+    """Count how many MOK (Machine Owner Key) certificates are enrolled.
+
+    Returns 0 if Secure Boot tooling is present but nothing is enrolled
+    (the "built the module, forgot to enroll a key" failure mode), a
+    positive int if keys are enrolled, or None if we couldn't determine
+    this (no mokutil, or the command failed for another reason).
+    """
+    mokutil = shutil.which("mokutil")
+    if not mokutil:
+        return None
+    try:
+        proc = runner([mokutil, "--list-enrolled"], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    # Each enrolled certificate block starts with a header line like "[key 1]".
+    count = len(re.findall(r"^\[key\s+\d+\]", proc.stdout, re.MULTILINE))
+    if count == 0 and "sbat" not in proc.stdout.lower() and proc.stdout.strip():
+        # Some mokutil versions print a plain human sentence instead of
+        # bracketed headers when nothing is enrolled -- treat any non-empty,
+        # non-error output without a recognized enrolled-key header as zero.
+        return 0
+    return count
+
+
+def module_signature_status(module: str, kernel: str, runner=subprocess.run) -> Optional[bool]:
+    """Best-effort check of whether `module` is cryptographically signed
+    for `kernel`, via `modinfo -k KERNEL MODULE`.
+
+    Returns True if a signer/signature field is present, False if modinfo
+    ran successfully but found no such field (module is unsigned), or
+    None if this couldn't be determined (missing modinfo, module not
+    found for that kernel, etc.) -- callers should treat None as
+    'unknown, not a finding', consistent with the rest of this module.
+    """
+    modinfo = shutil.which("modinfo")
+    if not modinfo:
+        return None
+    try:
+        proc = runner(
+            [modinfo, "-k", kernel, module], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    out = proc.stdout.lower()
+    return "signer:" in out or "sig_id:" in out
+
+
 # --- putting it together --------------------------------------------------
 
 
@@ -218,6 +270,8 @@ def evaluate(
     dkms_entries: list,
     headers_checker=headers_installed,
     secure_boot_checker=secure_boot_enabled,
+    mok_count_checker=get_enrolled_mok_count,
+    module_signature_checker=module_signature_status,
 ) -> Report:
     findings: list = []
 
@@ -271,15 +325,46 @@ def evaluate(
 
     sb = secure_boot_checker()
     if sb is True and modules:
-        findings.append(
-            Finding(
-                "info",
-                "Secure Boot is enabled and you have DKMS modules registered. "
-                "Unsigned/unenrolled modules will be silently refused at load time "
-                "even if the build succeeds -- verify your MOK is enrolled "
-                "(`mokutil --list-enrolled`) if a module unexpectedly fails to load.",
+        mok_count = mok_count_checker()
+        if mok_count == 0:
+            findings.append(
+                Finding(
+                    "fail",
+                    "Secure Boot is enabled, you have DKMS modules registered, but "
+                    "`mokutil --list-enrolled` reports NO enrolled Machine Owner Keys. "
+                    "A DKMS build can succeed and still be refused at load time with "
+                    "no enrolled key to trust it -- run `mokutil --import <your.der>` "
+                    "and complete enrollment at the blue MokManager screen on next boot.",
+                )
             )
-        )
+        else:
+            # Enrolled keys exist (or we couldn't count them) -- fall through to
+            # a signature spot-check per not-yet-booted kernel/module pair so we
+            # catch the "signed with a key that isn't the enrolled one" case too.
+            for kernel in not_yet_booted:
+                for module in modules:
+                    signed = module_signature_checker(module, kernel)
+                    if signed is False:
+                        findings.append(
+                            Finding(
+                                "fail",
+                                f"Secure Boot is enabled but DKMS module '{module}' for "
+                                f"kernel {kernel} has no signature (`modinfo` shows no "
+                                f"signer). It will be refused at load time after "
+                                f"rebooting into {kernel} unless it gets (re)signed.",
+                            )
+                        )
+            if mok_count is None:
+                findings.append(
+                    Finding(
+                        "info",
+                        "Secure Boot is enabled and you have DKMS modules registered. "
+                        "Unsigned/unenrolled modules will be silently refused at load "
+                        "time even if the build succeeds -- verify your MOK is "
+                        "enrolled (`mokutil --list-enrolled`) if a module unexpectedly "
+                        "fails to load.",
+                    )
+                )
 
     if not modules:
         findings.append(Finding("info", "No DKMS modules registered on this system."))
@@ -311,10 +396,18 @@ def collect_and_evaluate(
     def _secure_boot():
         return secure_boot_enabled(runner=runner)
 
+    def _mok_count():
+        return get_enrolled_mok_count(runner=runner)
+
+    def _module_signature(module, kernel):
+        return module_signature_status(module, kernel, runner=runner)
+
     return evaluate(
         running_kernel,
         installed_kernels,
         dkms_entries,
         headers_checker=_headers,
         secure_boot_checker=_secure_boot,
+        mok_count_checker=_mok_count,
+        module_signature_checker=_module_signature,
     )
