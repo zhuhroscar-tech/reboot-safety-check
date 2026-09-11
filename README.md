@@ -1,7 +1,19 @@
 # reboot-safety-check
 
+[![CI](https://github.com/zhuhroscar-tech/reboot-safety-check/actions/workflows/ci.yml/badge.svg)](https://github.com/zhuhroscar-tech/reboot-safety-check/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/zhuhroscar-tech/reboot-safety-check?include_prereleases&label=release)](https://github.com/zhuhroscar-tech/reboot-safety-check/releases)
+![Linux](https://img.shields.io/badge/platform-Linux-111111?logo=linux)
+
 Warns you about DKMS/kernel-module problems for a kernel you've just
 installed but haven't booted into yet — **before** you reboot into it.
+
+## Simple explanation
+
+Checks that your NVIDIA/AMD graphics driver, Wi-Fi driver, or other custom
+kernel add-on will actually work after you reboot into a newly installed
+kernel — before you reboot. Run it once after a system update and it
+catches build failures (missing driver, unsigned module under Secure Boot)
+that would otherwise leave you at a broken desktop or without Wi-Fi.
 
 ## The problem
 
