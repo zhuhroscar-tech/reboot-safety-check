@@ -3,10 +3,14 @@ from pathlib import Path
 
 from reboot_safety_check.core import (
     DkmsEntry,
+    collect_and_evaluate,
     evaluate,
     find_installed_kernels,
     get_running_kernel,
+    headers_installed,
     parse_dkms_status,
+    run_dkms_status,
+    secure_boot_enabled,
     _version_key,
 )
 
@@ -285,3 +289,232 @@ def test_module_signature_status_none_when_modinfo_missing(monkeypatch):
 
     monkeypatch.setattr(core_mod.shutil, "which", lambda name: None)
     assert module_signature_status("nvidia", "6.9.0-1-generic", runner=lambda *a, **k: None) is None
+
+
+# --- run_dkms_status ---------------------------------------------------
+
+
+def test_run_dkms_status_none_when_dkms_missing(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: None)
+    assert run_dkms_status(runner=lambda *a, **k: None) is None
+
+
+def test_run_dkms_status_returns_stdout(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/dkms")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=SAMPLE_DKMS_OUTPUT, stderr="")
+
+    assert run_dkms_status(runner=fake_runner) == SAMPLE_DKMS_OUTPUT
+
+
+def test_run_dkms_status_none_on_oserror(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/dkms")
+
+    def raising_runner(cmd, **kwargs):
+        raise OSError("dkms vanished")
+
+    assert run_dkms_status(runner=raising_runner) is None
+
+
+# --- get_running_kernel ---------------------------------------------------
+
+
+def test_get_running_kernel_none_on_oserror():
+    def raising_runner(cmd, **kwargs):
+        raise OSError("uname missing")
+
+    assert get_running_kernel(runner=raising_runner) is None
+
+
+# --- headers_installed ---------------------------------------------------
+
+
+def test_headers_installed_dpkg_true(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/dpkg-query" if name == "dpkg-query" else None)
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="install ok installed", stderr="")
+
+    assert headers_installed("6.8.0-51-generic", runner=fake_runner) is True
+
+
+def test_headers_installed_dpkg_false_on_nonzero(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/dpkg-query" if name == "dpkg-query" else None)
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found")
+
+    assert headers_installed("6.8.0-51-generic", runner=fake_runner) is False
+
+
+def test_headers_installed_dpkg_oserror_returns_none(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/dpkg-query" if name == "dpkg-query" else None)
+
+    def raising_runner(cmd, **kwargs):
+        raise OSError("dpkg-query missing")
+
+    assert headers_installed("6.8.0-51-generic", runner=raising_runner) is None
+
+
+def test_headers_installed_rpm_true(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/rpm" if name == "rpm" else None)
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="kernel-devel-6.8.0-51-generic", stderr="")
+
+    assert headers_installed("6.8.0-51-generic", runner=fake_runner) is True
+
+
+def test_headers_installed_rpm_false_on_nonzero(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/rpm" if name == "rpm" else None)
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found")
+
+    assert headers_installed("6.8.0-51-generic", runner=fake_runner) is False
+
+
+def test_headers_installed_rpm_oserror_returns_none(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/rpm" if name == "rpm" else None)
+
+    def raising_runner(cmd, **kwargs):
+        raise OSError("rpm missing")
+
+    assert headers_installed("6.8.0-51-generic", runner=raising_runner) is None
+
+
+def test_headers_installed_none_when_neither_dpkg_nor_rpm(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: None)
+    assert headers_installed("6.8.0-51-generic", runner=lambda *a, **k: None) is None
+
+
+# --- secure_boot_enabled ---------------------------------------------------
+
+
+def test_secure_boot_enabled_none_when_mokutil_missing(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: None)
+    assert secure_boot_enabled(runner=lambda *a, **k: None) is None
+
+
+def test_secure_boot_enabled_true(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="SecureBoot enabled\n", stderr="")
+
+    assert secure_boot_enabled(runner=fake_runner) is True
+
+
+def test_secure_boot_enabled_false(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="SecureBoot disabled\n", stderr="")
+
+    assert secure_boot_enabled(runner=fake_runner) is False
+
+
+def test_secure_boot_enabled_none_on_nonzero_returncode(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="err")
+
+    assert secure_boot_enabled(runner=fake_runner) is None
+
+
+def test_secure_boot_enabled_none_on_oserror(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def raising_runner(cmd, **kwargs):
+        raise OSError("mokutil vanished")
+
+    assert secure_boot_enabled(runner=raising_runner) is None
+
+
+# --- evaluate: unexpected DKMS status branch ------------------------------
+
+
+def test_evaluate_unexpected_dkms_status_is_warning():
+    dkms_entries = [DkmsEntry("nvidia", "1.0", "6.9.0-1-generic", "weird-status")]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert report.has_warnings
+    assert any(
+        "unexpected status" in f.message.lower() and f.level == "warn" for f in report.findings
+    )
+
+
+# --- collect_and_evaluate: real end-to-end wiring -------------------------
+
+
+def test_collect_and_evaluate_wires_all_checks_together(tmp_path, monkeypatch):
+    (tmp_path / "6.8.0-51-generic").mkdir()
+    (tmp_path / "6.9.0-1-generic").mkdir()
+
+    def fake_runner(cmd, **kwargs):
+        exe = cmd[0]
+        if exe.endswith("uname"):
+            return subprocess.CompletedProcess(cmd, 0, stdout="6.8.0-51-generic\n", stderr="")
+        if exe.endswith("dkms"):
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="nvidia/1.0, 6.8.0-51-generic, x86_64: installed\n",
+                stderr="",
+            )
+        if exe.endswith("mokutil") and cmd[1:] == ["--sb-state"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="SecureBoot disabled\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(
+        core_mod.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in ("dkms", "mokutil") else None,
+    )
+    monkeypatch.setattr(core_mod, "subprocess", subprocess)
+
+    report = collect_and_evaluate(modules_root=tmp_path, runner=fake_runner)
+
+    assert report.running_kernel == "6.8.0-51-generic"
+    assert report.installed_kernels == ["6.8.0-51-generic", "6.9.0-1-generic"]
+    # 6.9.0-1-generic has no DKMS build registered at all -> warning finding.
+    assert any("6.9.0-1-generic" in f.message for f in report.findings)
