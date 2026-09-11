@@ -32,18 +32,7 @@ desktop or a dropped Wi-Fi connection.
 
 ## What this does
 
-```
-$ reboot-safety-check
-Running kernel:    6.8.0-51-generic
-Installed kernels: 6.8.0-51-generic, 6.9.0-1-generic
-DKMS modules seen: nvidia
-
-[FAIL] DKMS module 'nvidia' for kernel 6.9.0-1-generic is only 'added', not
-       fully installed. This module likely will not load after rebooting
-       into 6.9.0-1-generic.
-
-Result: NOT SAFE to reboot yet -- see FAIL lines above.
-```
+![reboot-safety-check example output](docs/images/example-output.png)
 
 It cross-references every kernel version you have installed (via
 `/lib/modules/*`) against `dkms status`, flags any DKMS module that isn't
