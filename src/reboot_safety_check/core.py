@@ -277,7 +277,29 @@ def evaluate(
 
     modules = sorted({e.module for e in dkms_entries})
 
-    not_yet_booted = [k for k in installed_kernels if k != running_kernel]
+    if running_kernel is None:
+        # `uname -r` failed or was unavailable, so we have no way to tell
+        # which installed kernel is the one currently booted and running
+        # fine versus one that has never been booted. Treating every
+        # installed kernel as "not yet booted" (the previous behavior)
+        # produced false "fail" findings against the *currently running*
+        # kernel purely because we couldn't identify it -- actively wrong,
+        # not just incomplete. Be honest about the unknown instead of
+        # guessing: skip the per-kernel DKMS comparison entirely and say
+        # so, rather than accusing a working kernel of being broken.
+        findings.append(
+            Finding(
+                "warn",
+                "Could not determine the currently running kernel (`uname -r` "
+                "failed or is unavailable), so installed-but-not-yet-booted "
+                "kernels can't be distinguished from the one already running "
+                "fine. Skipping the per-kernel DKMS comparison to avoid "
+                "false positives against a kernel that may already be booted.",
+            )
+        )
+        not_yet_booted: list = []
+    else:
+        not_yet_booted = [k for k in installed_kernels if k != running_kernel]
 
     for kernel in not_yet_booted:
         for module in modules:

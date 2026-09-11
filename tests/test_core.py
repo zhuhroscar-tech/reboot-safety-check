@@ -80,6 +80,32 @@ def test_evaluate_flags_missing_build_for_new_kernel():
     assert any("6.9.0-1-generic" in f.message for f in report.findings)
 
 
+def test_evaluate_unknown_running_kernel_does_not_false_positive():
+    # Regression test: when `uname -r` fails/is unavailable, running_kernel
+    # is None. Previously `installed_kernels if k != running_kernel` treated
+    # every installed kernel (including the one actually booted and
+    # working fine) as "not yet booted", so a module that is merely
+    # 'built' (not fully 'installed') for the CURRENTLY RUNNING kernel was
+    # wrongly reported as a "fail" -- even though the system is booted and
+    # working right now. The tool must not fabricate a failure finding
+    # against a kernel it cannot even identify; it should say "unknown"
+    # instead.
+    dkms_entries = [DkmsEntry("nvidia", "570.86.15", "6.8.0-51-generic", "built")]
+    report = evaluate(
+        running_kernel=None,
+        installed_kernels=["6.8.0-51-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert not report.has_failures
+    assert any(
+        "could not determine the currently running kernel" in f.message.lower()
+        and f.level == "warn"
+        for f in report.findings
+    )
+
+
 def test_evaluate_flags_added_but_not_installed_as_failure():
     dkms_entries = [
         DkmsEntry("nvidia", "570.86.15", "6.8.0-51-generic", "installed"),
