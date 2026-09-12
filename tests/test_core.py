@@ -384,6 +384,21 @@ def test_headers_installed_dpkg_false_on_nonzero(monkeypatch):
     assert headers_installed("6.8.0-51-generic", runner=fake_runner) is False
 
 
+def test_headers_installed_dpkg_false_on_removed_config_files_state(monkeypatch):
+    """dpkg-query -W exits 0 even for a package it still knows about but
+    that isn't actually installed (e.g. removed with config kept). This
+    must report False (a real "headers missing" finding), not fall through
+    to None ("unknown, no finding") and silently hide the problem."""
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/dpkg-query" if name == "dpkg-query" else None)
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="deinstall ok config-files", stderr="")
+
+    assert headers_installed("6.8.0-51-generic", runner=fake_runner) is False
+
+
 def test_headers_installed_dpkg_oserror_returns_none(monkeypatch):
     import reboot_safety_check.core as core_mod
 

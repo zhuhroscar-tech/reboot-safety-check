@@ -147,8 +147,16 @@ def headers_installed(kernel_version: str, runner=subprocess.run) -> Optional[bo
             )
         except (OSError, subprocess.SubprocessError):
             return None
-        if proc.returncode == 0 and "install ok installed" in proc.stdout:
-            return True
+        if proc.returncode == 0:
+            # dpkg-query -W succeeds (rc=0) even for a package dpkg still
+            # knows about but that isn't actually installed anymore -- e.g.
+            # "deinstall ok config-files" (removed, config kept) or "purge
+            # ok not-installed". Only "install ok installed" means the
+            # headers are genuinely present; any other status string dpkg
+            # returns for a package it recognizes means "not installed",
+            # which must report False (a real finding), not fall through
+            # to None ("unknown, not a finding") and silently hide it.
+            return "install ok installed" in proc.stdout
         if proc.returncode != 0:
             return False
     # Fedora/RHEL
