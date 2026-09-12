@@ -493,6 +493,22 @@ def test_secure_boot_enabled_none_on_nonzero_returncode(monkeypatch):
     assert secure_boot_enabled(runner=fake_runner) is None
 
 
+def test_secure_boot_enabled_none_when_state_undeterminable(monkeypatch):
+    """mokutil --sb-state exits 0 even when it prints "Cannot determine
+    secure boot state." (e.g. non-UEFI host, unreadable EFI vars). That
+    must report None (unknown), never a false "disabled"."""
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def fake_runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="Cannot determine secure boot state.\n", stderr=""
+        )
+
+    assert secure_boot_enabled(runner=fake_runner) is None
+
+
 def test_secure_boot_enabled_none_on_oserror(monkeypatch):
     import reboot_safety_check.core as core_mod
 

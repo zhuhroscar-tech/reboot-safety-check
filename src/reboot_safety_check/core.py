@@ -179,6 +179,20 @@ def headers_installed(kernel_version: str, runner=subprocess.run) -> Optional[bo
 
 
 def secure_boot_enabled(runner=subprocess.run) -> Optional[bool]:
+    """Check whether Secure Boot is enabled via `mokutil --sb-state`.
+
+    mokutil's --sb-state always exits 0 -- even when it could NOT actually
+    determine the state (e.g. non-UEFI system, unreadable EFI variables),
+    in which case it prints "Cannot determine secure boot state." to
+    stdout instead of "SecureBoot enabled"/"SecureBoot disabled". Exit
+    code alone can't distinguish "genuinely disabled" from "unknown", so
+    naively checking only for the "enabled" substring silently treats an
+    undeterminable state as "disabled" -- which would then skip the
+    Secure Boot / DKMS-signature checks below for a system that might
+    actually have it enabled. Detect that explicit "cannot determine"
+    output and report None (unknown, not a finding) instead of a false
+    "disabled".
+    """
     mokutil = shutil.which("mokutil")
     if not mokutil:
         return None
@@ -188,7 +202,10 @@ def secure_boot_enabled(runner=subprocess.run) -> Optional[bool]:
         return None
     if proc.returncode != 0:
         return None
-    return "secureboot enabled" in proc.stdout.lower()
+    out = proc.stdout.lower()
+    if "cannot determine" in out:
+        return None
+    return "secureboot enabled" in out
 
 
 def get_enrolled_mok_count(runner=subprocess.run) -> Optional[int]:
