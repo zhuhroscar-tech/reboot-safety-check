@@ -324,7 +324,26 @@ def evaluate(
         )
         not_yet_booted: list = []
     else:
-        not_yet_booted = [k for k in installed_kernels if k != running_kernel]
+        # Only kernels *newer* than the currently running one are actually
+        # "not yet booted" in the sense this tool cares about (see the
+        # module docstring / README: "a kernel you've just installed but
+        # haven't booted into yet"). `installed_kernels` also routinely
+        # contains OLDER kernels that distros keep around as a rollback
+        # fallback (e.g. apt/dnf retaining the previous 1-2 kernel
+        # packages) -- those have, by definition, already booted
+        # successfully in the past. Treating them the same as a
+        # never-booted kernel produced false "fail"/"warn" findings
+        # whenever an old fallback kernel's DKMS registration happened to
+        # be stale or absent (e.g. after `dkms uninstall` ran for it, or
+        # it simply predates a module's current version) -- noise against
+        # a kernel that is not actually at risk of the failure mode this
+        # tool exists to catch.
+        running_key = _version_key(running_kernel)
+        not_yet_booted = [
+            k
+            for k in installed_kernels
+            if k != running_kernel and _version_key(k) > running_key
+        ]
 
     for kernel in not_yet_booted:
         for module in modules:
