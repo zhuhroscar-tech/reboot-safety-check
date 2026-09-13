@@ -71,7 +71,7 @@ pip install --user reboot-safety-check   # once published to PyPI
 Or grab the standalone `.pyz` from a GitHub Release (no pip/venv needed):
 
 ```bash
-curl -LO https://github.com/zhuhroscar-tech/reboot-safety-check/releases/download/v0.1.0/reboot-safety-check.pyz
+curl -LO https://github.com/zhuhroscar-tech/reboot-safety-check/releases/latest/download/reboot-safety-check.pyz
 python3 reboot-safety-check.pyz --help
 ```
 
