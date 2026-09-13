@@ -108,6 +108,54 @@ def test_evaluate_unknown_running_kernel_does_not_false_positive():
     )
 
 
+def test_evaluate_ignores_older_already_booted_fallback_kernel():
+    # Regression test: distros commonly keep 1-2 OLDER kernel packages
+    # installed as a rollback fallback (apt/dnf retain-old-kernels
+    # behavior) alongside the currently running (newest) kernel. Those
+    # older kernels have, by definition, already booted successfully in
+    # the past -- they are not "installed but not yet booted" in the
+    # sense this tool's own README/docstring describe ("a kernel you've
+    # just installed but haven't booted into yet"). Previously
+    # `installed_kernels if k != running_kernel` treated *any* other
+    # installed kernel -- older or newer -- as not-yet-booted, so a
+    # stale/absent DKMS registration for an old fallback kernel produced
+    # a false "fail"/"warn" finding against a kernel that isn't actually
+    # at risk of the never-booted-broken-module failure mode.
+    dkms_entries = [
+        DkmsEntry("nvidia", "570.86.15", "6.9.0-1-generic", "installed"),
+        DkmsEntry("nvidia", "570.86.15", "6.8.0-51-generic", "built"),
+    ]
+    report = evaluate(
+        running_kernel="6.9.0-1-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert not report.has_failures
+    assert not report.has_warnings
+    assert not any("6.8.0-51-generic" in f.message for f in report.findings)
+
+
+def test_evaluate_still_flags_missing_build_for_genuinely_newer_kernel():
+    # Companion to the above: a NEWER installed-but-not-yet-booted kernel
+    # must still be checked and flagged -- the fix must not suppress the
+    # tool's actual purpose, only stop misapplying it to older kernels.
+    dkms_entries = [
+        DkmsEntry("nvidia", "570.86.15", "6.8.0-51-generic", "installed"),
+        DkmsEntry("nvidia", "570.86.15", "6.9.0-1-generic", "built"),
+    ]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert report.has_failures
+    assert any("6.9.0-1-generic" in f.message and f.level == "fail" for f in report.findings)
+
+
 def test_evaluate_flags_added_but_not_installed_as_failure():
     dkms_entries = [
         DkmsEntry("nvidia", "570.86.15", "6.8.0-51-generic", "installed"),
