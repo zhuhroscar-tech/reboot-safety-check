@@ -6,8 +6,10 @@ from reboot_safety_check.core import (
     collect_and_evaluate,
     evaluate,
     find_installed_kernels,
+    get_enrolled_mok_count,
     get_running_kernel,
     headers_installed,
+    module_signature_status,
     parse_dkms_status,
     run_dkms_status,
     secure_boot_enabled,
@@ -518,6 +520,61 @@ def test_secure_boot_enabled_none_on_oserror(monkeypatch):
         raise OSError("mokutil vanished")
 
     assert secure_boot_enabled(runner=raising_runner) is None
+
+
+def test_get_enrolled_mok_count_none_on_oserror(monkeypatch):
+    """Regression test: get_enrolled_mok_count's own try/except around
+    `mokutil --list-enrolled` was exercised only via a returncode!=0
+    fake runner (test_get_enrolled_mok_count_none_on_failure), never via
+    the runner itself raising OSError/SubprocessError -- the actual
+    exception branch at core.py's `except (OSError, subprocess.SubprocessError)`
+    for this function had zero coverage before this test."""
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def raising_runner(cmd, **kwargs):
+        raise OSError("mokutil vanished")
+
+    assert get_enrolled_mok_count(runner=raising_runner) is None
+
+
+def test_get_enrolled_mok_count_none_on_timeout(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/bin/mokutil")
+
+    def raising_runner(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 10)
+
+    assert get_enrolled_mok_count(runner=raising_runner) is None
+
+
+def test_module_signature_status_none_on_oserror(monkeypatch):
+    """Regression test: module_signature_status's try/except around
+    `modinfo -k KERNEL MODULE` was exercised only via a nonzero
+    returncode fake runner (test_module_signature_status_none_on_failure),
+    never via the runner itself raising OSError/SubprocessError -- the
+    actual exception branch had zero coverage before this test."""
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/modinfo")
+
+    def raising_runner(cmd, **kwargs):
+        raise OSError("modinfo vanished")
+
+    assert module_signature_status("nvidia", "6.9.0-1-generic", runner=raising_runner) is None
+
+
+def test_module_signature_status_none_on_timeout(monkeypatch):
+    import reboot_safety_check.core as core_mod
+
+    monkeypatch.setattr(core_mod.shutil, "which", lambda name: "/usr/sbin/modinfo")
+
+    def raising_runner(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 10)
+
+    assert module_signature_status("nvidia", "6.9.0-1-generic", runner=raising_runner) is None
 
 
 # --- evaluate: unexpected DKMS status branch ------------------------------
