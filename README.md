@@ -1,142 +1,53 @@
+[![English](https://img.shields.io/badge/English-555555?style=flat)](README.md) [![简体中文](https://img.shields.io/badge/简体中文-555555?style=flat)](README.zh-CN.md)
+
 # reboot-safety-check
 
-[![CI](https://github.com/zhuhroscar-tech/reboot-safety-check/actions/workflows/ci.yml/badge.svg)](https://github.com/zhuhroscar-tech/reboot-safety-check/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/zhuhroscar-tech/reboot-safety-check?include_prereleases&label=release)](https://github.com/zhuhroscar-tech/reboot-safety-check/releases)
-![Linux](https://img.shields.io/badge/platform-Linux-111111?logo=linux)
+A read-only Linux CLI for reviewing DKMS kernel-module problems after a kernel update, before rebooting. It looks for missing or incomplete module builds, missing kernel headers, and Secure Boot signing risks that can leave graphics, networking, or other out-of-tree drivers unavailable.
 
-Warns you about DKMS/kernel-module problems for a kernel you've just
-installed but haven't booted into yet — **before** you reboot into it.
-
-## Simple explanation
-
-Checks that your NVIDIA/AMD graphics driver, Wi-Fi driver, or other custom
-kernel add-on will actually work after you reboot into a newly installed
-kernel — before you reboot. Run it once after a system update and it
-catches build failures (missing driver, unsigned module under Secure Boot)
-that would otherwise leave you at a broken desktop or without Wi-Fi.
-
-## The problem
-
-On distros that use DKMS (out-of-tree kernel modules: proprietary NVIDIA/AMD
-GPU drivers, Wi-Fi drivers like `rtl8812au`/`rtl8852au`, VirtualBox host
-modules, ZFS, ...), installing a new kernel package does **not** guarantee
-the DKMS module was rebuilt successfully for it. When the build silently
-fails — missing kernel headers, a compiler mismatch, a kernel API the module
-hasn't caught up with — the system boots into the new kernel with that
-module simply missing: no GPU driver, no Wi-Fi, no VirtualBox. This is a
-recurring, well-documented failure mode across Arch, Ubuntu, Fedora and
-Debian forums/bug trackers (DKMS builds failing after kernel updates,
-`dkms status` showing `added` instead of `installed`, NVIDIA/rtl88xx modules
-specifically) — and by the time you notice, you're already at a broken
-desktop or a dropped Wi-Fi connection.
-
-## What this does
-
-![reboot-safety-check example output](docs/images/example-output.png)
-
-It cross-references every kernel version you have installed (via
-`/lib/modules/*`) against `dkms status`, flags any DKMS module that isn't
-fully `installed` for an installed-but-not-yet-booted kernel, checks whether
-matching kernel headers are present (a common root cause of build failure),
-and — when Secure Boot is enabled — actually verifies module signing state
-instead of just telling you to check manually:
-
-- If Secure Boot is on and **no Machine Owner Key is enrolled at all**
-  (`mokutil --list-enrolled` reports zero), that's flagged as a **FAIL**:
-  a DKMS build can succeed and still be silently refused at load time with
-  no enrolled key to trust it.
-- If keys are enrolled, each not-yet-booted kernel's DKMS module is spot
-  checked via `modinfo -k KERNEL MODULE` for a `signer:`/`sig_id:` field;
-  a module built but genuinely unsigned is flagged as a **FAIL** naming the
-  exact module and kernel, not a generic reminder.
-
-This closes the exact gap behind "the build succeeded, the module still
-won't load" reports common with NVIDIA/AMD DKMS drivers under Secure Boot.
-
-**Read-only.** It never runs `dkms install`, never calls a package manager,
-and never reboots, signs, or enrolls anything — it only reads `dkms status`,
-`/lib/modules`, `uname -r`, package-manager query commands (`dpkg-query -W`,
-`rpm -q`), `mokutil --sb-state`, `mokutil --list-enrolled`, and
-`modinfo -k`.
+![Example report](docs/images/example-output.png)
 
 ## Install
 
-Requires Python 3.9+. `dkms` itself is optional — if it's not installed,
-the tool just reports "no DKMS modules registered" (nothing to check).
-
-```bash
-pip install --user reboot-safety-check   # once published to PyPI
-```
-
-Or grab the standalone `.pyz` from a GitHub Release (no pip/venv needed):
-
-```bash
-curl -LO https://github.com/zhuhroscar-tech/reboot-safety-check/releases/latest/download/reboot-safety-check.pyz
-python3 reboot-safety-check.pyz --help
-```
-
-Or from source:
+Requires Linux and Python 3.9+. The implementation uses the Python standard library and reads local system information.
 
 ```bash
 git clone https://github.com/zhuhroscar-tech/reboot-safety-check.git
 cd reboot-safety-check
-pip install --user .
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
 ```
+
+Standalone `.pyz` packages are available from [GitHub Releases](https://github.com/zhuhroscar-tech/reboot-safety-check/releases); verify the release checksum before running a downloaded artifact.
 
 ## Usage
 
-Run it any time after `apt upgrade` / `dnf upgrade` / `pacman -Syu` installs
-a new kernel, before you reboot:
+Run after your package manager installs a new kernel:
 
 ```bash
-reboot-safety-check          # human-readable report
-reboot-safety-check --json   # machine-readable JSON
+reboot-safety-check
+reboot-safety-check --json
+reboot-safety-check --no-color
 ```
 
-Exit codes: `0` safe to reboot, `1` warnings worth reviewing, `2` a real
-failure was found (a DKMS module will very likely be missing after reboot).
+Exit codes: **0** means no warning or failure was found, **1** means review warnings, and **2** means a failure was found. Read the findings before deciding to reboot: exit 0 is not a guarantee that the machine will boot successfully.
 
-## Uninstall
+## What is checked
+
+- Installed kernels in `/lib/modules` are compared with `uname -r`. Per-kernel checks target versions that sort newer than the running kernel, not every non-running kernel.
+- `dkms status` is checked for registered modules and whether builds are fully installed.
+- `dpkg-query` or `rpm` checks matching header packages when available.
+- With Secure Boot enabled, `mokutil` checks enrolled Machine Owner Keys and `modinfo -k` looks for module signature fields.
+
+These are best-effort checks. Signature fields do not prove that a signature matches an enrolled, trusted key. Missing tools, unrecognized output, or insufficient permissions can leave checks incomplete. If DKMS is unavailable or no entries are collected, there may be nothing to compare; do not interpret that as verification of all drivers. The tool does not validate the bootloader, initramfs, or the entire boot path.
+
+It never installs modules, changes packages, signs or enrolls keys, or reboots. No network access or telemetry is used. Resolve findings through your distribution's normal maintenance process and keep a known-good fallback kernel.
+
+## Development
 
 ```bash
-pip uninstall reboot-safety-check
+python -m pip install -e '.[dev]'
+python -m pytest -v
 ```
 
-No config files, no persistent state, no cache — it's a stateless read-only
-check.
-
-## Privacy & permissions
-
-No network access, no telemetry. Reads `/lib/modules`, runs `dkms status`,
-`uname -r`, `dpkg-query`/`rpm -q`, `mokutil --sb-state`, `mokutil
---list-enrolled`, and `modinfo -k` — all read-only, no root required for
-any of these on a standard install (though `dkms status` output can be
-more complete when run as root on some distros).
-
-## Distro / architecture support
-
-Pure Python (stdlib only). Works on any Linux distribution and architecture
-with Python 3.9+; `dkms`, `dpkg`/`rpm`, `mokutil`, and `modinfo` are used
-opportunistically when present and gracefully skipped when absent (their
-absence is reported as "unknown", never treated as an error).
-
-## Reproducible build & test
-
-```bash
-git clone https://github.com/zhuhroscar-tech/reboot-safety-check.git
-cd reboot-safety-check
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e . pytest
-pytest -v
-python -m build
-python -m zipapp build/pyz-deps -m "reboot_safety_check.cli:main" -o dist/reboot-safety-check.pyz
-```
-
-CI (`.github/workflows/ci.yml`) runs the same steps on real Ubuntu Linux
-GitHub Actions runners for every push/PR, including a smoke test of the
-installed console script and the standalone `.pyz` against the runner's
-actual kernel/module state.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+[Demo video](docs/demo.mp4) · [MIT license](LICENSE).
