@@ -35,7 +35,7 @@ reboot-safety-check --no-color
 ## 检查内容
 
 - 将 `/lib/modules` 中的内核与 `uname -r` 对比。逐内核检查仅针对版本排序高于当前运行内核的版本，而非所有未运行的内核。
-- 读取 `dkms status`，检查已登记模块及其构建是否处于 installed 状态。
+- 读取 `dkms status`，检查已登记模块及其构建是否处于 installed 状态。若模块显示为 `installed` 但 dkms 自身附带"Diff between built and installed module"警告，或状态为 `broken`（缺少源码目录），会单独给出具体提示，而不是归入笼统的警告信息。
 - 有相应工具时，通过 `dpkg-query` 或 `rpm` 查询匹配的 kernel headers。
 - Secure Boot 启用时，通过 `mokutil` 检查已登记的 Machine Owner Key，并通过 `modinfo -k` 查找模块签名字段。
 

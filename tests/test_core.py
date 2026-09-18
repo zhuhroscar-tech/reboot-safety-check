@@ -625,6 +625,70 @@ def test_module_signature_status_none_on_timeout(monkeypatch):
     assert module_signature_status("nvidia", "6.9.0-1-generic", runner=raising_runner) is None
 
 
+def test_evaluate_broken_dkms_module_is_failure():
+    # Regression test: dkms(8) documents "broken" as a genuine, well-defined
+    # status (source directory or 'source' symlink missing; dkms refuses to
+    # build/install until manually re-added) -- a real failure, not merely an
+    # "unexpected" string. Before this fix, "broken" fell into the same
+    # generic warn-level "unexpected status" bucket as a truly unrecognized
+    # value, understating its severity (a module dkms cannot rebuild at all
+    # is strictly worse than one that is merely 'added'/'built').
+    dkms_entries = [
+        DkmsEntry("nvidia", "570.86.15", "6.8.0-51-generic", "installed"),
+        DkmsEntry("nvidia", "570.86.15", "6.9.0-1-generic", "broken"),
+    ]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert report.has_failures
+    assert any(
+        "broken" in f.message.lower() and f.level == "fail" and "6.9.0-1-generic" in f.message
+        for f in report.findings
+    )
+
+
+def test_evaluate_installed_with_diff_warning_is_flagged_specifically():
+    # Regression test: real-world `dkms status` output (see e.g. askubuntu
+    # 1246534, common on Ubuntu NVIDIA-driver systems) can report a module
+    # as "installed" while ALSO appending "(WARNING! Diff between built and
+    # installed module!)" -- meaning the .ko actually present under
+    # /lib/modules/<kernel> no longer matches what dkms itself built and
+    # verified (commonly because a package manager reinstalled/overwrote it
+    # afterward). Before this fix, this real status string did not match the
+    # exact "installed" in DKMS_GOOD_STATUSES, so it fell through to the
+    # generic, vague "unexpected status" warning -- never explaining the
+    # actual risk (module that loads after reboot may not be the verified
+    # one) or the fix (`dkms install --force`).
+    dkms_entries = [
+        DkmsEntry(
+            "nvidia",
+            "570.86.15",
+            "6.9.0-1-generic",
+            "installed (WARNING! Diff between built and installed module!)",
+        ),
+    ]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert not report.has_failures
+    assert report.has_warnings
+    assert any(
+        "diff between the built and installed module" in f.message.lower()
+        and "--force" in f.message
+        and f.level == "warn"
+        for f in report.findings
+    )
+    assert not any("unexpected status" in f.message.lower() for f in report.findings)
+
+
 # --- evaluate: unexpected DKMS status branch ------------------------------
 
 

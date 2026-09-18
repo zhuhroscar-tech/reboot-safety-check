@@ -35,7 +35,7 @@ Exit codes: **0** means no warning or failure was found, **1** means review warn
 ## What is checked
 
 - Installed kernels in `/lib/modules` are compared with `uname -r`. Per-kernel checks target versions that sort newer than the running kernel, not every non-running kernel.
-- `dkms status` is checked for registered modules and whether builds are fully installed.
+- `dkms status` is checked for registered modules and whether builds are fully installed. A module reported `installed` but with dkms's own "Diff between built and installed module" warning, or reported `broken` (missing source directory), is called out specifically rather than folded into a generic warning.
 - `dpkg-query` or `rpm` checks matching header packages when available.
 - With Secure Boot enabled, `mokutil` checks enrolled Machine Owner Keys and `modinfo -k` looks for module signature fields.
 

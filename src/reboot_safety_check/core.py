@@ -288,6 +288,27 @@ class Report:
 DKMS_GOOD_STATUSES = {"installed"}
 DKMS_BAD_STATUSES = {"added", "built"}  # registered/compiled but not installed for that kernel
 
+# dkms status appends this exact parenthetical (sometimes repeated several
+# times on one line, once per file dkms compared) to an otherwise
+# "installed" line when the module file(s) actually present under
+# /lib/modules/<kernel> no longer match what dkms itself built and
+# recorded -- a real, well-documented failure mode (see e.g. Ubuntu 22.04
+# NVIDIA-driver forum threads, askubuntu 1246534) typically caused by a
+# package manager or manual `make install` overwriting/removing the
+# dkms-built .ko after dkms considered it "installed". The module that
+# actually loads after reboot may therefore NOT be the one dkms thinks it
+# verified -- this must not be silently folded into the same generic
+# "unexpected status" warning as a truly unrecognized status string.
+_DKMS_DIFF_WARNING_RE = re.compile(r"diff between built and installed module", re.IGNORECASE)
+
+# Per dkms(8): if a module/version's source directory (or the `source`
+# symlink pointing to it) is missing, `dkms status` reports it as
+# "broken" and refuses to build/install it until it is manually re-added
+# -- a distinct, more specific failure than the generic "added"/"built"
+# bucket (which mean "registered/compiled but not yet installed for this
+# kernel", not "cannot be rebuilt at all without manual intervention").
+DKMS_BROKEN_STATUSES = {"broken"}
+
 
 def evaluate(
     running_kernel: Optional[str],
@@ -359,9 +380,10 @@ def evaluate(
                 )
                 continue
             for m in matches:
-                if m.status.lower() in DKMS_GOOD_STATUSES:
+                status_lower = m.status.lower()
+                if status_lower in DKMS_GOOD_STATUSES:
                     continue
-                if m.status.lower() in DKMS_BAD_STATUSES:
+                if status_lower in DKMS_BAD_STATUSES:
                     findings.append(
                         Finding(
                             "fail",
@@ -370,14 +392,48 @@ def evaluate(
                             f"will not load after rebooting into {kernel}.",
                         )
                     )
-                else:
+                    continue
+                if status_lower in DKMS_BROKEN_STATUSES or status_lower.startswith("broken"):
+                    findings.append(
+                        Finding(
+                            "fail",
+                            f"DKMS module '{module}' for kernel {kernel} is 'broken' "
+                            f"(dkms cannot find its source directory / 'source' symlink). "
+                            f"It cannot be rebuilt for {kernel} without manually re-adding "
+                            f"it (`dkms add`) first.",
+                        )
+                    )
+                    continue
+                if status_lower.startswith("installed") and _DKMS_DIFF_WARNING_RE.search(m.status):
+                    # dkms reports the line as "installed" (its own good status)
+                    # AND appends this warning -- previously that combination fell
+                    # through to the generic "unexpected status" branch below,
+                    # which produced a vague, unactionable message. This is a
+                    # distinct, well-documented condition: the .ko file(s) under
+                    # /lib/modules/<kernel> no longer match what dkms itself built,
+                    # commonly because a package manager reinstalled/overwrote the
+                    # module after dkms verified it. Report it specifically so the
+                    # actual risk (the module that loads after reboot may not be
+                    # the one dkms verified) and the fix are both clear.
                     findings.append(
                         Finding(
                             "warn",
-                            f"DKMS module '{module}' for kernel {kernel} has unexpected "
-                            f"status '{m.status}'.",
+                            f"DKMS module '{module}' for kernel {kernel} is marked "
+                            f"'installed' but dkms itself flagged a diff between the "
+                            f"built and installed module file(s). The module that "
+                            f"loads after rebooting into {kernel} may not match what "
+                            f"dkms verified. Rebuild and reinstall it explicitly: "
+                            f"`dkms install -m {module} -v {m.mod_version} -k {kernel} --force`.",
                         )
                     )
+                    continue
+                findings.append(
+                    Finding(
+                        "warn",
+                        f"DKMS module '{module}' for kernel {kernel} has unexpected "
+                        f"status '{m.status}'.",
+                    )
+                )
 
         headers_ok = headers_checker(kernel)
         if headers_ok is False and modules:
