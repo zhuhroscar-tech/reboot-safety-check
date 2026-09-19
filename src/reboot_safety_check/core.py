@@ -288,18 +288,38 @@ class Report:
 DKMS_GOOD_STATUSES = {"installed"}
 DKMS_BAD_STATUSES = {"added", "built"}  # registered/compiled but not installed for that kernel
 
-# dkms status appends this exact parenthetical (sometimes repeated several
-# times on one line, once per file dkms compared) to an otherwise
-# "installed" line when the module file(s) actually present under
-# /lib/modules/<kernel> no longer match what dkms itself built and
-# recorded -- a real, well-documented failure mode (see e.g. Ubuntu 22.04
-# NVIDIA-driver forum threads, askubuntu 1246534) typically caused by a
-# package manager or manual `make install` overwriting/removing the
-# dkms-built .ko after dkms considered it "installed". The module that
-# actually loads after reboot may therefore NOT be the one dkms thinks it
-# verified -- this must not be silently folded into the same generic
-# "unexpected status" warning as a truly unrecognized status string.
-_DKMS_DIFF_WARNING_RE = re.compile(r"diff between built and installed module", re.IGNORECASE)
+# dkms status appends a parenthetical to an otherwise "installed" line
+# when the module file(s) actually present under /lib/modules/<kernel> no
+# longer match what dkms itself built and recorded -- a real,
+# well-documented failure mode (see e.g. Ubuntu 22.04 NVIDIA-driver forum
+# threads, askubuntu 1246534) typically caused by a package manager or
+# manual `make install` overwriting/removing the dkms-built .ko after
+# dkms considered it "installed" (or, per current upstream dkms, a
+# benign difference from module signing/compression -- see below). The
+# module that actually loads after reboot may therefore NOT be the one
+# dkms thinks it verified -- this must not be silently folded into the
+# same generic "unexpected status" warning as a truly unrecognized
+# status string.
+#
+# The exact wording changed upstream. Legacy dkms (Dell's
+# linux.dell.com/dkms tree, still what most 2020-2023-era forum posts and
+# distro packages document) printed, once PER FILE COMPARED (so it can
+# repeat several times on one logical line):
+#   "installed (WARNING! Diff between built and installed module!)"
+# The actively maintained fork (github.com/dkms-project/dkms, the
+# upstream since Dell's tree went dormant -- verified directly against
+# its module_status_built_extra() in dkms.in as of 2026-09) instead
+# prints this ONCE, with different wording and no "WARNING!"/exclamation:
+#   "installed (Differences between built and installed modules)"
+# A regex anchored only to the legacy "diff between built and installed
+# module" text does not match the new "differences between ... modules"
+# wording at all (different word, different plural) -- on any host
+# running the current dkms fork, this specific, well-documented,
+# actionable finding silently degrades to the generic, unhelpful
+# "unexpected status" warning instead. Match both wordings.
+_DKMS_DIFF_WARNING_RE = re.compile(
+    r"diff(?:erences?)? between built and installed modules?", re.IGNORECASE
+)
 
 # Per dkms(8): if a module/version's source directory (or the `source`
 # symlink pointing to it) is missing, `dkms status` reports it as
@@ -414,15 +434,21 @@ def evaluate(
                     # commonly because a package manager reinstalled/overwrote the
                     # module after dkms verified it. Report it specifically so the
                     # actual risk (the module that loads after reboot may not be
-                    # the one dkms verified) and the fix are both clear.
+                    # the one dkms verified) and the fix are both clear. Also note
+                    # the current upstream dkms fork's own documented benign cause
+                    # (module signing or compression legitimately changes the file
+                    # dkms compares) so this isn't over-read as certain breakage.
                     findings.append(
                         Finding(
                             "warn",
                             f"DKMS module '{module}' for kernel {kernel} is marked "
-                            f"'installed' but dkms itself flagged a diff between the "
-                            f"built and installed module file(s). The module that "
-                            f"loads after rebooting into {kernel} may not match what "
-                            f"dkms verified. Rebuild and reinstall it explicitly: "
+                            f"'installed' but dkms itself flagged a diff/difference "
+                            f"between the built and installed module file(s). This can "
+                            f"be benign (module signing or compression legitimately "
+                            f"changes the file dkms compares), or it can mean the "
+                            f"module that loads after rebooting into {kernel} does not "
+                            f"match what dkms verified. If unsigned/uncompressed on "
+                            f"this system, rebuild and reinstall explicitly: "
                             f"`dkms install -m {module} -v {m.mod_version} -k {kernel} --force`.",
                         )
                     )

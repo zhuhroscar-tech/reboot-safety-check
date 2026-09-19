@@ -681,7 +681,45 @@ def test_evaluate_installed_with_diff_warning_is_flagged_specifically():
     assert not report.has_failures
     assert report.has_warnings
     assert any(
-        "diff between the built and installed module" in f.message.lower()
+        "diff/difference" in f.message.lower()
+        and "--force" in f.message
+        and f.level == "warn"
+        for f in report.findings
+    )
+    assert not any("unexpected status" in f.message.lower() for f in report.findings)
+
+
+def test_evaluate_installed_with_current_dkms_fork_diff_wording_is_flagged():
+    # Regression test: the actively maintained dkms fork
+    # (github.com/dkms-project/dkms, current upstream since Dell's tree
+    # went dormant -- verified directly against module_status_built_extra()
+    # in dkms.in) prints a DIFFERENT, non-"WARNING!"-prefixed wording for
+    # the same underlying condition: "installed (Differences between built
+    # and installed modules)" -- singular "Diff" -> "Differences", plural
+    # "module" -> "modules", no exclamation mark. A regex anchored only to
+    # the legacy wording (fixed by this same change) would silently miss
+    # this on any host running the current dkms fork, degrading to the
+    # generic "unexpected status" warning instead of the specific,
+    # actionable one.
+    dkms_entries = [
+        DkmsEntry(
+            "vboxhost",
+            "7.0.14",
+            "6.9.0-1-generic",
+            "installed (Differences between built and installed modules)",
+        ),
+    ]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic", "6.9.0-1-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert not report.has_failures
+    assert report.has_warnings
+    assert any(
+        "diff/difference" in f.message.lower()
         and "--force" in f.message
         and f.level == "warn"
         for f in report.findings
