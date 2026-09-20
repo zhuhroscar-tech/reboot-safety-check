@@ -625,6 +625,112 @@ def test_module_signature_status_none_on_timeout(monkeypatch):
     assert module_signature_status("nvidia", "6.9.0-1-generic", runner=raising_runner) is None
 
 
+def test_parse_dkms_status_handles_module_level_added_without_kernel():
+    # Regression test: dkms's own do_status() (dkms.in, module_status())
+    # only emits a kernel/arch field for 'built'/'installed' lines. The
+    # 'added' status is reported when module_status_built() found NO
+    # buildable kernel directory at all for this module/version -- do_status()
+    # then prints the module-level line with NO kernel field whatsoever:
+    #   echo "$m/$v: $status"   # -> "nvidia/580.65.06: added"
+    # (verified directly against the current upstream dkms-project/dkms
+    # fork's dkms.in do_status()/module_status() functions, not guessed).
+    # The existing _DKMS_LINE_RE requires a comma-separated kernel field
+    # before the colon, so this real, common output line silently failed
+    # to match and was dropped entirely -- the module never appeared in
+    # dkms_entries at all, meaning it could never be flagged as a problem
+    # by evaluate(), even though "never built for any kernel, including the
+    # one currently running" is arguably the single worst DKMS state this
+    # tool exists to catch.
+    entries = parse_dkms_status("nvidia/580.65.06: added\n")
+    assert len(entries) == 1
+    assert entries[0].module == "nvidia"
+    assert entries[0].mod_version == "580.65.06"
+    assert entries[0].status == "added"
+    assert entries[0].kernel == ""
+
+
+def test_parse_dkms_status_handles_module_level_broken_without_kernel():
+    # Companion regression test: 'broken' (missing source dir / symlink) is
+    # ALSO emitted by do_status() with no kernel field: echo "$m/$v: $status".
+    # DKMS_BROKEN_STATUSES already exists in evaluate() to handle this
+    # status specifically and the README explicitly documents that a
+    # 'broken' module "is called out specifically rather than folded into
+    # a generic warning" -- but that branch was unreachable via real
+    # `dkms status` output before this fix, since parse_dkms_status()
+    # silently dropped every module-level broken/added line.
+    entries = parse_dkms_status("rtl8812au/5.13.6.r61.gad90dfb: broken\n")
+    assert len(entries) == 1
+    assert entries[0].module == "rtl8812au"
+    assert entries[0].status == "broken"
+    assert entries[0].kernel == ""
+
+
+def test_parse_dkms_status_mixed_module_level_and_per_kernel_lines():
+    # Realistic combined output: one module fully broken, one never built
+    # for anything, one normally installed with a kernel field. All three
+    # shapes must be parsed, not just the per-kernel one.
+    output = (
+        "nvidia/580.65.06: added\n"
+        "rtl8812au/5.13.6.r61.gad90dfb: broken\n"
+        "vboxhost/7.0.14, 6.9.0-1-generic, x86_64: installed\n"
+    )
+    entries = parse_dkms_status(output)
+    assert len(entries) == 3
+    by_module = {e.module: e for e in entries}
+    assert by_module["nvidia"].kernel == ""
+    assert by_module["nvidia"].status == "added"
+    assert by_module["rtl8812au"].kernel == ""
+    assert by_module["rtl8812au"].status == "broken"
+    assert by_module["vboxhost"].kernel == "6.9.0-1-generic"
+    assert by_module["vboxhost"].status == "installed"
+
+
+def test_evaluate_module_level_broken_is_unconditional_failure():
+    # Regression test: a module-level 'broken' entry (kernel == "") means
+    # the module's DKMS source directory is missing entirely -- true for
+    # EVERY kernel, including the one currently running right now, not
+    # just "not yet booted" ones. Before this fix, such an entry either
+    # never existed (parser silently dropped it) or, even if constructed
+    # directly, was invisible to evaluate() because the per-kernel loop
+    # only inspects `not_yet_booted` kernels and a kernel="" entry never
+    # matches any real kernel string there. This must be reported
+    # regardless of which kernel is currently running.
+    dkms_entries = [DkmsEntry("rtl8812au", "5.13.6.r61.gad90dfb", "", "broken")]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic"],  # no newer, not-yet-booted kernel at all
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert report.has_failures
+    assert any(
+        "rtl8812au" in f.message and "broken" in f.message.lower() and f.level == "fail"
+        for f in report.findings
+    )
+
+
+def test_evaluate_module_level_added_never_built_is_unconditional_failure():
+    # Regression test: a module-level 'added' entry (kernel == "") means
+    # dkms has never successfully built this module for ANY kernel --
+    # including the one currently running. This is not caught by the
+    # not_yet_booted per-kernel loop (there may be no newer kernel at
+    # all) and must be surfaced as its own failure.
+    dkms_entries = [DkmsEntry("nvidia", "580.65.06", "", "added")]
+    report = evaluate(
+        running_kernel="6.8.0-51-generic",
+        installed_kernels=["6.8.0-51-generic"],
+        dkms_entries=dkms_entries,
+        headers_checker=lambda k: True,
+        secure_boot_checker=lambda: False,
+    )
+    assert report.has_failures
+    assert any(
+        "nvidia" in f.message and "never" in f.message.lower() and f.level == "fail"
+        for f in report.findings
+    )
+
+
 def test_evaluate_broken_dkms_module_is_failure():
     # Regression test: dkms(8) documents "broken" as a genuine, well-defined
     # status (source directory or 'source' symlink missing; dkms refuses to

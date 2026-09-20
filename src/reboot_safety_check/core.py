@@ -85,6 +85,26 @@ _DKMS_LINE_RE = re.compile(
     r"(?P<kernel>[^,]+?)(?:,\s*(?P<arch>\S+))?\s*:\s*(?P<status>.+)$"
 )
 
+# dkms's own do_status() (verified directly against the current upstream
+# dkms-project/dkms fork's dkms.in module_status()/do_status()) prints a
+# DIFFERENT, kernel-less line shape for the 'added' and 'broken' statuses
+# specifically: those are module/version-level facts (no build was ever
+# attempted for ANY kernel, or the source directory itself is missing),
+# so do_status() emits `echo "$m/$v: $status"` with no comma-separated
+# kernel/arch field at all -- e.g. "nvidia/580.65.06: added" or
+# "rtl8812au/5.13.6.r61.gad90dfb: broken". The kernel-requiring
+# _DKMS_LINE_RE above never matches this shape, so real 'added'/'broken'
+# lines were silently dropped by parse_dkms_status() entirely: the module
+# never became a DkmsEntry, so evaluate() could never flag it -- even
+# though "never built for any kernel" or "source directory missing" are
+# among the worst DKMS states this tool exists to catch (and 'broken' is
+# already explicitly documented in the README as being "called out
+# specifically", a claim this bug made false in practice).
+_DKMS_MODULE_LEVEL_LINE_RE = re.compile(
+    r"^(?P<module>[^/,]+)/(?P<mod_version>[^,:]+)\s*:\s*(?P<status>added|broken)\s*$",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class DkmsEntry:
@@ -101,16 +121,26 @@ def parse_dkms_status(output: str) -> list:
         if not line:
             continue
         m = _DKMS_LINE_RE.match(line)
-        if not m:
-            continue
-        entries.append(
-            DkmsEntry(
-                module=m.group("module"),
-                mod_version=m.group("mod_version"),
-                kernel=m.group("kernel").strip(),
-                status=m.group("status").strip(),
+        if m:
+            entries.append(
+                DkmsEntry(
+                    module=m.group("module"),
+                    mod_version=m.group("mod_version"),
+                    kernel=m.group("kernel").strip(),
+                    status=m.group("status").strip(),
+                )
             )
-        )
+            continue
+        m2 = _DKMS_MODULE_LEVEL_LINE_RE.match(line)
+        if m2:
+            entries.append(
+                DkmsEntry(
+                    module=m2.group("module"),
+                    mod_version=m2.group("mod_version").strip(),
+                    kernel="",
+                    status=m2.group("status").strip(),
+                )
+            )
     return entries
 
 
@@ -342,6 +372,38 @@ def evaluate(
     findings: list = []
 
     modules = sorted({e.module for e in dkms_entries})
+
+    # Module-level entries (kernel == "") represent a dkms.in do_status()
+    # 'added' or 'broken' status: a fact about the module/version as a
+    # whole (no build ever attempted for ANY kernel, or the source
+    # directory/symlink is missing), not scoped to any particular kernel.
+    # These are true right now, for the currently running kernel included
+    # -- they must not be gated behind the not_yet_booted per-kernel loop
+    # below, which only ever looks at kernels newer than the one running.
+    for e in dkms_entries:
+        if e.kernel != "":
+            continue
+        status_lower = e.status.lower()
+        if status_lower == "broken":
+            findings.append(
+                Finding(
+                    "fail",
+                    f"DKMS module '{e.module}' is 'broken' (dkms cannot find its "
+                    f"source directory / 'source' symlink) -- this affects every "
+                    f"kernel, including the one currently running. It cannot be "
+                    f"rebuilt without manually re-adding it (`dkms add`) first.",
+                )
+            )
+        elif status_lower == "added":
+            findings.append(
+                Finding(
+                    "fail",
+                    f"DKMS module '{e.module}' has never been successfully built "
+                    f"for any kernel, including the one currently running. Run "
+                    f"`dkms build -m {e.module} -v {e.mod_version}` (and `dkms "
+                    f"install`) or check `dkms status` output for a build error.",
+                )
+            )
 
     if running_kernel is None:
         # `uname -r` failed or was unavailable, so we have no way to tell
