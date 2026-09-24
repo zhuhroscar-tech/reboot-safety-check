@@ -18,7 +18,7 @@ source .venv/bin/activate
 python -m pip install .
 ```
 
-[GitHub Releases](https://github.com/zhuhroscar-tech/reboot-safety-check/releases) 提供独立 `.pyz`；运行下载的文件前，请先核对 release 的 checksum。
+[GitHub Releases](https://github.com/zhuhroscar-tech/reboot-safety-check/releases) 提供独立 `.pyz`；运行下载的文件前，请先核对 release 的 checksum。版本历史记录在 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 使用
 
@@ -50,4 +50,4 @@ python -m pip install -e '.[dev]'
 python -m pytest -v
 ```
 
-[演示视频](docs/demo.mp4) · [MIT 许可证](LICENSE)。
+[演示视频](docs/demo.mp4) · [版本历史](CHANGELOG.md) · [MIT 许可证](LICENSE)。

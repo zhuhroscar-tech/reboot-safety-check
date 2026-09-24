@@ -18,7 +18,7 @@ source .venv/bin/activate
 python -m pip install .
 ```
 
-Standalone `.pyz` packages are available from [GitHub Releases](https://github.com/zhuhroscar-tech/reboot-safety-check/releases); verify the release checksum before running a downloaded artifact.
+Standalone `.pyz` packages are available from [GitHub Releases](https://github.com/zhuhroscar-tech/reboot-safety-check/releases); verify the release checksum before running a downloaded artifact. Release history is kept in [CHANGELOG.md](CHANGELOG.md).
 
 ## Usage
 
@@ -50,4 +50,4 @@ python -m pip install -e '.[dev]'
 python -m pytest -v
 ```
 
-[Demo video](docs/demo.mp4) · [MIT license](LICENSE).
+[Demo video](docs/demo.mp4) · [Release history](CHANGELOG.md) · [MIT license](LICENSE).
