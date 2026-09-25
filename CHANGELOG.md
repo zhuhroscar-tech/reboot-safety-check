@@ -2,6 +2,12 @@
 
 All notable user-facing changes are tracked here. This project uses GitHub Releases for downloadable artifacts; this file keeps the repository history visible from a checkout.
 
+## v0.3.3 - 2026-09-25
+
+- Made CI run explicitly on `v*` release tags so published releases exercise the same build and smoke-test path as `main`.
+- Added package metadata pointing to this changelog and repository-contract coverage for both release-tag CI and changelog metadata.
+- No runtime behavior changes.
+
 ## v0.3.2 - 2026-09-24
 
 - Added this changelog and repository-contract coverage so release history, license links, CI wiring, and release artifact expectations stay documented in the repository.

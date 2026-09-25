@@ -55,10 +55,17 @@ def test_changelog_tracks_current_and_recent_releases():
 
 def test_ci_builds_release_artifacts_and_checksums():
     ci_text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert 'tags: ["v*"]' in ci_text
     assert "python -m build" in ci_text
     assert "dist/reboot-safety-check.pyz" in ci_text
     assert "sha256sum * > SHA256SUMS.txt" in ci_text
     assert "actions/upload-artifact@v4" in ci_text
+
+
+def test_package_metadata_links_changelog():
+    text = PYPROJECT.read_text(encoding="utf-8")
+    assert "Changelog" in text
+    assert "CHANGELOG.md" in text
 
 
 def test_codeql_workflow_is_enabled():
